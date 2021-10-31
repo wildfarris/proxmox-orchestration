@@ -14,7 +14,9 @@ function New-ProxmoxConfiguration {
         $DNSDomain = Read-Host -Prompt "DNS Domain for bind zone file? "
         if(!$DNSDomain){Write-Error "Must provide a value" -ErrorAction Stop}
         $ZoneFile = Read-Host -Prompt "File path to create zone file? "
-        if(!$DNSDomain){Write-Error "Must provide a value" -ErrorAction Stop}
+        if(!$ZoneFile){Write-Error "Must provide a value" -ErrorAction Stop}
+        $NSRecord = Read-Host -Prompt "IP address for nameserver? "
+        if(!$NSRecord){Write-Error "Must provide a value" -ErrorAction Stop}
         $CreateBind = $true
     } else {
         $CreateBind = $false
@@ -29,6 +31,7 @@ function New-ProxmoxConfiguration {
         CreateBind = $CreateBind
         Domain     = $DNSDomain
         ZoneFile   = $ZoneFile
+        NSRecord   = $NSRecord
     }
 
     Write-Verbose ("Configuration read: " + ($ProxmoxConfiguration | ConvertTo-Json -Compress))
@@ -113,7 +116,7 @@ function Get-ServiceData {
 
     $return = $Services | ForEach-Object {
         $ServiceName = $_
-        $Components = $VMData | Where-Object { $_.name -like "$ServiceName-*" }
+        $Components = $ManagedVMs | Where-Object { $_.name -like "$ServiceName-*" }
         
         New-Object -TypeName psobject -Property @{
             Service    = $ServiceName

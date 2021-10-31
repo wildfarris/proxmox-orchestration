@@ -1,24 +1,26 @@
-function New-ProxmoxConfiguration {
+function New-PVEConfiguration {
+    [CmdletBinding()]
     $Target = Read-Host -Prompt "Proxmox Server? "
-    if(!$Target){Write-Error "Must provide a value" -ErrorAction Stop}
+    if (!$Target) { Write-Error "Must provide a value" -ErrorAction Stop }
     $ProxmoxToken = Read-Host -Prompt "Proxmox API Token (Format: PVEAPIToken=<USERNAME>@<REALM>!<API-TOKEN-NAME>=<SECRET>)? "
-    if(!$ProxmoxToken){Write-Error "Must provide a value" -ErrorAction Stop}
+    if (!$ProxmoxToken) { Write-Error "Must provide a value" -ErrorAction Stop }
     $PoolName = Read-Host -Prompt "Proxmox resource pool name? "
-    if(!$PoolName){Write-Error "Must provide a value" -ErrorAction Stop}
+    if (!$PoolName) { Write-Error "Must provide a value" -ErrorAction Stop }
     $HostGroup = Read-Host -Prompt "Proxmox host group name? "
-    if(!$HostGroup){Write-Error "Must provide a value" -ErrorAction Stop}
+    if (!$HostGroup) { Write-Error "Must provide a value" -ErrorAction Stop }
     $Iterations = Read-Host -Prompt "How many times should Agmen iterate? (Default: 20)"
-    if(!$Iterations){$Iterations = 20}
+    if (!$Iterations) { $Iterations = 20 }
     $CreateBind = Read-Host -Prompt "Create bind zone file? (y/N) " 
-    if($CreateBind -eq "y"){
+    if ($CreateBind -eq "y") {
         $DNSDomain = Read-Host -Prompt "DNS Domain for bind zone file? "
-        if(!$DNSDomain){Write-Error "Must provide a value" -ErrorAction Stop}
+        if (!$DNSDomain) { Write-Error "Must provide a value" -ErrorAction Stop }
         $ZoneFile = Read-Host -Prompt "File path to create zone file? "
-        if(!$ZoneFile){Write-Error "Must provide a value" -ErrorAction Stop}
+        if (!$ZoneFile) { Write-Error "Must provide a value" -ErrorAction Stop }
         $NSRecord = Read-Host -Prompt "IP address for nameserver? "
-        if(!$NSRecord){Write-Error "Must provide a value" -ErrorAction Stop}
+        if (!$NSRecord) { Write-Error "Must provide a value" -ErrorAction Stop }
         $CreateBind = $true
-    } else {
+    }
+    else {
         $CreateBind = $false
         $DNSDomain = $false
     }
@@ -39,14 +41,16 @@ function New-ProxmoxConfiguration {
     ConvertTo-Json $ProxmoxConfiguration
 }
 
-function Get-ProxmoxConnectionConfig {
+function Get-PVEConnectionConfig {
+    [CmdletBinding()]
     param($File, $Target, $Authorization, $Format = "json")
-    if($File){
-        if(Test-Path -Path $File){
+    if ($File) {
+        if (Test-Path -Path $File) {
             $Config = Get-Content $File | Out-String | ConvertFrom-Json
             $Target = $Config.Target
             $Authorization = $Config.Auth
-        } else{
+        }
+        else {
             Write-Error "$File does not exist"
         }
     }
@@ -56,7 +60,8 @@ function Get-ProxmoxConnectionConfig {
             Target = $Target
             Format = $Format
         }
-    } else {
+    }
+    else {
         Write-Error "Missing required parameters. Must have -File or both -Target and -Authorization"
     }
     
@@ -65,19 +70,21 @@ function Get-ProxmoxConnectionConfig {
 
 }
 
-function Invoke-ProxmoxCall {
+function Invoke-PVECall {
+    [CmdletBinding()]
     param($ProxmoxConfiguration, $Endpoint, $Method = "GET", $Body)
 
     $Uri = $ProxmoxConfiguration.Target + "/api2/" + $ProxmoxConfiguration.Format + "/" + $Endpoint
 
     Write-Verbose ("Making call to: " + $Uri)
-    if($Body) { Write-Verbose ("Call body: " + $Body) }
+    if ($Body) { Write-Verbose ("Call body: " + $Body) }
 
     try {
-        if($PSVersionTable.PSVersion.Major -lt 7){
-            $response = Invoke-RestMethod -Method $Method -Headers @{Authorization = $ProxmoxConfiguration.Auth} -Body $Body -Uri $Uri
-        } else{
-            $response = Invoke-RestMethod -Method $Method -Headers @{Authorization = $ProxmoxConfiguration.Auth} -Body $Body -Uri $Uri -SkipHeaderValidation
+        if ($PSVersionTable.PSVersion.Major -lt 7) {
+            $response = Invoke-RestMethod -Method $Method -Headers @{Authorization = $ProxmoxConfiguration.Auth } -Body $Body -Uri $Uri
+        }
+        else {
+            $response = Invoke-RestMethod -Method $Method -Headers @{Authorization = $ProxmoxConfiguration.Auth } -Body $Body -Uri $Uri -SkipHeaderValidation
         }
     }
     catch {
@@ -88,17 +95,18 @@ function Invoke-ProxmoxCall {
     $response | Select-Object -expand data
 }
 
-function Get-ManagedVMs {
+function Get-PVEManagedVMs {
+    [CmdletBinding()]
     param($ProxmoxConfiguration, $Pool)
 
-    $ManagedVMs = Invoke-ProxmoxCall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "pools/$Pool" | Select-Object -ExpandProperty members
+    $ManagedVMs = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "pools/$Pool" | Select-Object -ExpandProperty members
 
     $return = $ManagedVMs | ForEach-Object {
         $node = $_.node
         $id = $_.id
 
         $Ignored_IPs = @("127.0.0.1", "172.17.0.1")
-        $results = Invoke-ProxmoxCall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$node/$id/agent/network-get-interfaces"
+        $results = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$node/$id/agent/network-get-interfaces"
         $ipaddresses = $results.result."ip-addresses" | Where-Object { $_."ip-address-type" -eq "ipv4" -and $_."ip-address" -notin $Ignored_IPs } | Select-Object -ExpandProperty ip-address
         if (!$ipaddresses) { $ipaddresses = "0.0.0.0" }
 
@@ -109,7 +117,8 @@ function Get-ManagedVMs {
     $return
 }
 
-function Get-ServiceData {
+function Get-PVEServiceData {
+    [CmdletBinding()]
     param($ManagedVMs)
 
     $Services = $ManagedVMs | Where-Object { $_.name -like "*-*" } | Select-Object -ExpandProperty name | ForEach-Object { $_ -split "-" | Select-Object -First 1 } | Sort-Object -Unique
@@ -128,10 +137,11 @@ function Get-ServiceData {
     $return
 }
 
-function Get-NodeData {
-    param ($ProxmoxConfiguration)
-    $data = Invoke-ProxmoxCall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes" 
-    $ManagedNodes = (Invoke-ProxmoxCall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "cluster/ha/groups/Agmen").nodes -split ","
+function Get-PVENodeData {
+    [CmdletBinding()]
+    param ($ProxmoxConfiguration,$Group)
+    $data = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes" 
+    $ManagedNodes = (Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "cluster/ha/groups/$Group").nodes -split ","
 
     $nodes = $data | Where-Object { $_.node -in $ManagedNodes } | ForEach-Object {
         New-Object -TypeName psobject -Property @{
@@ -153,13 +163,23 @@ function Get-NodeData {
     $return
 }
 
-function New-Remediation {
+function New-PVEHARemediation {
+    [CmdletBinding()]
     param($Remediation)
-    New-Object -TypeName psobject -Property $Remediation | Select-Object FromNode, ToNode, VM | ConvertTo-Json -Compress
+    New-Object -TypeName psobject -Property $Remediation | Select-Object FromNode, ToNode, VM
 }
 
-function Update-HAConfig {
-    param($NodeData, $ServiceData, $VMData)
+function Update-PVEHAConfig {
+    [CmdletBinding()]
+    param($Group, $Pool, $ProxmoxConfiguration)
+
+    $NodeData = Get-PVENodeData -ProxmoxConfiguration $ProxmoxConfiguration -Group $Group
+    Write-Verbose ("Found: " + @($NodeData.nodes).Count + " nodes")
+    $VMData = Get-PVEManagedVMs -ProxmoxConfiguration $ProxmoxConfiguration -Pool $Pool
+    Write-Verbose ("Found: " + @($VMData).Count + " VMs")
+    $ServiceData = Get-PVEServiceData -ManagedVMs $VMData
+    Write-Verbose ("Found: " + @($ServiceData).Count + " services") 
+
     $MaxHA = $NodeData.nodes.Count
 
     $HAFacts = New-Object -TypeName System.Collections.ArrayList 
@@ -176,7 +196,7 @@ function Update-HAConfig {
             $fact = New-Object -TypeName psobject -Property @{
                 Rule        = "Service_not_dispersed"
                 Target      = $_.Service
-                Remediation = New-Remediation -Remediation @{VM = $MoveCandidate.vmid; FromNode = $MoveCandidate.Node; ToNode = $DestinationCandidate.Name }
+                Remediation = New-PVEHARemediation -Remediation @{VM = $MoveCandidate.vmid; FromNode = $MoveCandidate.Node; ToNode = $DestinationCandidate.Name }
             }
             if ($Fact.Remediation -notin $HAFacts.Remediation) { [void]$HAFacts.Add($fact) }
         }
@@ -189,7 +209,7 @@ function Update-HAConfig {
                     $fact = New-Object -TypeName psobject -Property @{
                         Rule        = "Service_dispersed_one_per_node_BLOCKMOVES"
                         Target      = $ServiceName
-                        Remediation = New-Remediation -Remediation @{VM = $VM; FromNode = $CurrentNode; ToNode = $_ }
+                        Remediation = New-PVEHARemediation -Remediation @{VM = $VM; FromNode = $CurrentNode; ToNode = $_ }
                     }
                     if ($Fact.Remediation -notin $HAFacts.Remediation) { [void]$HAFacts.Add($fact) }
                 }
@@ -205,7 +225,7 @@ function Update-HAConfig {
                     $fact = New-Object -TypeName psobject -Property @{
                         Rule        = "Service_dispersed_BLOCKMOVES"
                         Target      = $ServiceName
-                        Remediation = New-Remediation -Remediation @{VM = $VM; FromNode = $Thisnode; ToNode = $_ }
+                        Remediation = New-PVEHARemediation -Remediation @{VM = $VM; FromNode = $Thisnode; ToNode = $_ }
                     }
                     if ($Fact.Remediation -notin $HAFacts.Remediation) { [void]$HAFacts.Add($fact) }
                 }
@@ -225,7 +245,7 @@ function Update-HAConfig {
             $fact = New-Object -TypeName psobject -Property @{
                 Rule        = "Unbalanced_Memory_HIGHMEMMOVE"
                 Target      = $_.Name
-                Remediation = New-Remediation -Remediation @{VM = $HighMemVM.vmid; FromNode = $_.Name; ToNode = $LowMemNode.Name }
+                Remediation = New-PVEHARemediation -Remediation @{VM = $HighMemVM.vmid; FromNode = $_.Name; ToNode = $LowMemNode.Name }
             }
             if ($Fact.Remediation -notin $HAFacts.Remediation) { [void]$HAFacts.Add($fact) }
         }
@@ -234,7 +254,7 @@ function Update-HAConfig {
             $fact = New-Object -TypeName psobject -Property @{
                 Rule        = "Unbalanced_Memory_LOWMEMMOVE"
                 Target      = $_.Name
-                Remediation = New-Remediation -Remediation @{VM = $LowMemVM.vmid; FromNode = $_.Name; ToNode = $LowMemNode.Name }
+                Remediation = New-PVEHARemediation -Remediation @{VM = $LowMemVM.vmid; FromNode = $_.Name; ToNode = $LowMemNode.Name }
             }
             if ($Fact.Remediation -notin $HAFacts.Remediation) { [void]$HAFacts.Add($fact) }
         }
@@ -242,16 +262,50 @@ function Update-HAConfig {
     $HAFacts | Where-Object { $_.Rule -cnotlike "*_BLOCKMOVES" }
 }
 
-function Move-VM {
+function Move-PVEVM {
+    [CmdletBinding()]
     param($ProxmoxConfiguration, $MoveData)
-    Invoke-ProxmoxCall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$($MoveData.FromNode)/qemu/$($MoveData.VM)/migrate" -Body ('target=' + $MoveData.ToNode + ';online=1') -Method "POST" | Out-Null
+    Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$($MoveData.FromNode)/qemu/$($MoveData.VM)/migrate" -Body ('target=' + $MoveData.ToNode + ';online=1') -Method "POST" | Out-Null
 }
 
-Export-ModuleMember -Function New-ProxmoxConfiguration
-Export-ModuleMember -Function Get-ProxmoxConnectionConfig
-Export-ModuleMember -Function Invoke-ProxmoxCall
-Export-ModuleMember -Function Get-ManagedVMs
-Export-ModuleMember -Function Get-ServiceData
-Export-ModuleMember -Function Get-NodeData
-Export-ModuleMember -Function Update-HAConfig
-Export-ModuleMember -Function Move-VM
+function Convertto-PVEBindZone {
+    [CmdletBinding()]
+    param($Domain, $PrimaryDNS, $AdminEmail, $TTL = 600, $ServiceData, $VMData, $NSRecord)
+    $file = '$TTL 86400' + [System.Environment]::NewLine
+    $file += "@`tIN`tSOA`t$PrimaryDNS`.`t$AdminEmail`. (" + [System.Environment]::NewLine
+    $file += "`t`t`t`t`t`t" + (Get-Date -Format yyyyMMdd) + "01" + [System.Environment]::NewLine
+    $file += "`t`t`t`t`t`t" + [math]::Round(($TTL * .5), 0) + [System.Environment]::NewLine
+    $file += "`t`t`t`t`t`t" + [math]::Round(($TTL * .25), 0) + [System.Environment]::NewLine
+    $file += "`t`t`t`t`t`t" + $TTL + [System.Environment]::NewLine
+    $file += "`t`t`t`t`t`t" + [math]::Round(($TTL * .9), 0) + [System.Environment]::NewLine
+    $file += "`t`t)" + [System.Environment]::NewLine
+    $file += "`t`t" + "NS`t$PrimaryDNS`." + [System.Environment]::NewLine
+    $file += "`$ORIGIN" + "`t$Domain`." + [System.Environment]::NewLine
+    $file += [System.Environment]::NewLine
+    if ($ServiceData.Service -notcontains "ns") {
+        if ($NSRecord) {
+            $NSRecord | ForEach-Object { $file += ("ns`tIN`tA`t" + $NSRecord + [System.Environment]::NewLine) }
+        }
+        else {
+            $PrimaryInterface = Get-NetIPInterface | Sort-Object interfacemetric | Where-Object { $_.connectionstate -eq "connected" } | Select-Object -first 1 -ExpandProperty InterfaceIndex
+            $PrimaryIP = (Get-NetIPAddress -ifIndex $PrimaryInterface | Where-Object { $_.AddressFamily -eq "IPv4" }).ipaddress
+            $file += ("ns`tIN`tA`t" + $PrimaryIP + [System.Environment]::NewLine)
+        }
+    }
+    $VMData | ForEach-Object { $file += ($_.name + "`tIN`tA`t" + $_.ip_addresses + [System.Environment]::NewLine) }
+    $ServiceData | ForEach-Object {
+        $ServiceName = $_.Service
+        $_.Components | ForEach-Object { $file += ($ServiceName + "`tIN`tA`t" + $_.ip_addresses + [System.Environment]::NewLine) }
+    }
+    $file
+}
+
+Export-ModuleMember -Function New-PVEConfiguration
+Export-ModuleMember -Function Get-PVEConnectionConfig
+Export-ModuleMember -Function Invoke-PVECall
+Export-ModuleMember -Function Get-PVEManagedVMs
+Export-ModuleMember -Function Get-PVEServiceData
+Export-ModuleMember -Function Get-PVENodeData
+Export-ModuleMember -Function Update-PVEHAConfig
+Export-ModuleMember -Function Move-PVEVM
+Export-ModuleMember -Function Convertto-PVEBindZone

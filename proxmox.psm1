@@ -244,7 +244,7 @@ function Move-VM {
     Invoke-ProxmoxCall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$($MoveData.FromNode)/qemu/$($MoveData.VM)/migrate" -Body ('target=' + $MoveData.ToNode + ';online=1') -Method "POST" | Out-Null
 }
 
-
+Export-ModuleMember -Function New-ProxmoxConfiguration
 Export-ModuleMember -Function Get-ProxmoxConnectionConfig
 Export-ModuleMember -Function Invoke-ProxmoxCall
 Export-ModuleMember -Function Get-ManagedVMs

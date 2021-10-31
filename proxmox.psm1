@@ -113,7 +113,7 @@ function Get-ServiceData {
 
     $return = $Services | ForEach-Object {
         $ServiceName = $_
-        $Components = $VMData | Where-Object { $_.name -like "$ServiceName-*" }
+        $Components = $ManagedVMs | Where-Object { $_.name -like "$ServiceName-*" }
         
         New-Object -TypeName psobject -Property @{
             Service    = $ServiceName

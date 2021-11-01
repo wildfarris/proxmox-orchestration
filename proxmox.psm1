@@ -293,7 +293,7 @@ function Convertto-PVEBindZone {
     $file += [System.Environment]::NewLine
     if ($ServiceData.Service -notcontains "ns") {
         if ($NSRecord) {
-            $NSRecord | ForEach-Object { $file += ("ns`tIN`tA`t" + $NSRecord + [System.Environment]::NewLine) }
+            $NSRecord | ForEach-Object { $file += ("ns`tIN`tA`t" + $_ + [System.Environment]::NewLine) }
         }
         else {
             $PrimaryInterface = Get-NetIPInterface | Sort-Object interfacemetric | Where-Object { $_.connectionstate -eq "connected" } | Select-Object -first 1 -ExpandProperty InterfaceIndex

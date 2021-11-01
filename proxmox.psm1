@@ -254,7 +254,7 @@ function Move-PVEVM {
 }
 
 function Optimize-PVEResourceBalance{
-    param($ProxmoxConfiguration, $Loops, $Pause = 30)
+    param($ProxmoxConfiguration, $Loops = 20, $Pause = 30)
     
     for ($x = 0; $x -lt $Loops; $x++) {
         Write-Verbose ("Starting loop " + $x)
@@ -275,10 +275,9 @@ function Optimize-PVEResourceBalance{
     }
 }
 
-
 function Convertto-PVEBindZone {
-    param($Domain, $PrimaryDNS, $AdminEmail, $TTL = 600, $ProxmoxConfiguration, $NSRecord)
-    
+    param($PrimaryDNS, $AdminEmail, $TTL = 600, $ProxmoxConfiguration, [switch]$OutFile)
+
     $NodeData = Get-PVENodeData -ProxmoxConfiguration $ProxmoxConfiguration
     Write-Verbose ("Found: " + @($NodeData.nodes).Count + " nodes")
     $VMData = Get-PVEManagedVMs -ProxmoxConfiguration $ProxmoxConfiguration
@@ -286,38 +285,38 @@ function Convertto-PVEBindZone {
     $ServiceData = Get-PVEServiceData -ManagedVMs $VMData
     Write-Verbose ("Found: " + @($ServiceData).Count + " services") 
 
-    $file = '$TTL 86400' + [System.Environment]::NewLine
-    $file += "@`tIN`tSOA`t$PrimaryDNS`.`t$AdminEmail`. (" + [System.Environment]::NewLine
-    $file += "`t`t`t`t`t`t" + (Get-Date -Format yyyyMMdd) + "01" + [System.Environment]::NewLine
-    $file += "`t`t`t`t`t`t" + [math]::Round(($TTL * .5), 0) + [System.Environment]::NewLine
-    $file += "`t`t`t`t`t`t" + [math]::Round(($TTL * .25), 0) + [System.Environment]::NewLine
-    $file += "`t`t`t`t`t`t" + $TTL + [System.Environment]::NewLine
-    $file += "`t`t`t`t`t`t" + [math]::Round(($TTL * .9), 0) + [System.Environment]::NewLine
-    $file += "`t`t)" + [System.Environment]::NewLine
-    $file += "`t`t" + "NS`t$PrimaryDNS`." + [System.Environment]::NewLine
-    $file += "`$ORIGIN" + "`t$Domain`." + [System.Environment]::NewLine
-    $file += [System.Environment]::NewLine
-    if ($ServiceData.Service -notcontains "ns") {
-        if ($NSRecord) {
-            $NSRecord | ForEach-Object { $file += ("ns`tIN`tA`t" + $_ + [System.Environment]::NewLine) }
-        }
-        else {
-            $PrimaryInterface = Get-NetIPInterface | Sort-Object interfacemetric | Where-Object { $_.connectionstate -eq "connected" } | Select-Object -first 1 -ExpandProperty InterfaceIndex
-            $PrimaryIP = (Get-NetIPAddress -ifIndex $PrimaryInterface | Where-Object { $_.AddressFamily -eq "IPv4" }).ipaddress
-            $file += ("ns`tIN`tA`t" + $PrimaryIP + [System.Environment]::NewLine)
-        }
+    $Output = '$TTL 86400' + [System.Environment]::NewLine
+    $Output += "@`tIN`tSOA`t$PrimaryDNS`.`t$AdminEmail`. (" + [System.Environment]::NewLine
+    $Output += "`t`t`t`t`t`t" + (Get-Date -Format yyyyMMdd) + "01" + [System.Environment]::NewLine
+    $Output += "`t`t`t`t`t`t" + [math]::Round(($TTL * .5), 0) + [System.Environment]::NewLine
+    $Output += "`t`t`t`t`t`t" + [math]::Round(($TTL * .25), 0) + [System.Environment]::NewLine
+    $Output += "`t`t`t`t`t`t" + $TTL + [System.Environment]::NewLine
+    $Output += "`t`t`t`t`t`t" + [math]::Round(($TTL * .9), 0) + [System.Environment]::NewLine
+    $Output += "`t`t)" + [System.Environment]::NewLine
+    $Output += "`t`t" + "NS`t$PrimaryDNS`." + [System.Environment]::NewLine
+    $Output += "`$ORIGIN" + "`t$($ProxmoxConfiguration.Domain)`." + [System.Environment]::NewLine
+    $Output += [System.Environment]::NewLine
+    if ($ProxmoxConfiguration.NSRecord) {
+        $ProxmoxConfiguration.NSRecord | ForEach-Object { $Output += ("ns`tIN`tA`t" + $_ + [System.Environment]::NewLine) }
+    }
+    elseif ($ServiceData.Service -notcontains "ns") {
+        $PrimaryInterface = Get-NetIPInterface | Sort-Object interfacemetric | Where-Object { $_.connectionstate -eq "connected" } | Select-Object -first 1 -ExpandProperty InterfaceIndex
+        $PrimaryIP = (Get-NetIPAddress -ifIndex $PrimaryInterface | Where-Object { $_.AddressFamily -eq "IPv4" }).ipaddress
+        $Output += ("ns`tIN`tA`t" + $PrimaryIP + [System.Environment]::NewLine)
     }
     $NodeData.nodes | ForEach-Object {
         $node = $_.name
         $nodeip = (Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$node/network/vmbr0").address
-        $file += $_.name + "`tIN`tA`t" + $nodeip + [System.Environment]::NewLine
+        $Output += $_.name + "`tIN`tA`t" + $nodeip + [System.Environment]::NewLine
     }
-    $VMData | ForEach-Object { $file += ($_.name + "`tIN`tA`t" + $_.ipaddress + [System.Environment]::NewLine) }
+    $VMData | ForEach-Object { $Output += ($_.name + "`tIN`tA`t" + $_.ipaddress + [System.Environment]::NewLine) }
     $ServiceData | ForEach-Object {
         $ServiceName = $_.Service
-        $_.Components | ForEach-Object { $file += ($ServiceName + "`tIN`tA`t" + $_.ipaddress + [System.Environment]::NewLine) }
+        $_.Components | ForEach-Object { $Output += ($ServiceName + "`tIN`tA`t" + $_.ipaddress + [System.Environment]::NewLine) }
     }
-    $file
+
+    if($OutFile){$Output | Out-File $ProxmoxConfiguration.ZoneFile}
+    else{$Output}
 }
 
 Export-ModuleMember -Function New-PVEConfiguration

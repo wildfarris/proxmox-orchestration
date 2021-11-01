@@ -22,12 +22,12 @@ if ($File) {
 
 Import-Module $PSScriptRoot\proxmox.psm1 -force
 
-$ProxmoxConfiguration = Get-PVEConnectionConfig -Target $Target -Authorization $Auth
+$ProxmoxConfiguration = Get-PVEConnectionConfig -Target $Target -Authorization $Auth -Group $Group -Pool $Pool
 
 for ($x = 0; $x -lt $Loops; $x++) {
     Write-Verbose ("Starting loop " + $x)
 
-    $Remediations = Update-PVEHAConfig -ProxmoxConfiguration $ProxmoxConfiguration -Group $Group -Pool $Pool
+    $Remediations = Update-PVEHAConfig -ProxmoxConfiguration $ProxmoxConfiguration
 
     if ($Remediations) {
         $Remediations | ForEach-Object { 
@@ -42,4 +42,4 @@ for ($x = 0; $x -lt $Loops; $x++) {
     }
 }
 
-if ($GenerateBind) { Convertto-PVEBindZone -Domain $Domain -PrimaryDNS ("ns." + $Domain) -AdminEmail ("webmaster@" + $Domain) -ServiceData $ServiceData -VMData $VMData -NSRecord $NSRecord | Out-File $ZoneFile }
+if ($GenerateBind) { Convertto-PVEBindZone -Domain $Domain -PrimaryDNS ("ns." + $Domain) -AdminEmail ("webmaster@" + $Domain)  -ProxmoxConfiguration $ProxmoxConfiguration -NSRecord $NSRecord | Out-File $ZoneFile }

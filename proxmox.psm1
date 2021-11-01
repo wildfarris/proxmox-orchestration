@@ -43,12 +43,14 @@ function New-PVEConfiguration {
 
 function Get-PVEConnectionConfig {
     [CmdletBinding()]
-    param($File, $Target, $Authorization, $Format = "json")
+    param($File, $Target, $Authorization, $Format = "json", $Group, $Pool)
     if ($File) {
         if (Test-Path -Path $File) {
             $Config = Get-Content $File | Out-String | ConvertFrom-Json
             $Target = $Config.Target
             $Authorization = $Config.Auth
+            $Group = $Config.Group
+            $Pool = $Config.Pool
         }
         else {
             Write-Error "$File does not exist"
@@ -59,6 +61,8 @@ function Get-PVEConnectionConfig {
             Auth   = $Authorization
             Target = $Target
             Format = $Format
+            Group = $Group
+            Pool = $Pool
         }
     }
     else {
@@ -67,7 +71,6 @@ function Get-PVEConnectionConfig {
     
     Write-Verbose ("Configuration read: " + ($Config | ConvertTo-Json -Compress))
     $Config
-
 }
 
 function Invoke-PVECall {
@@ -97,9 +100,9 @@ function Invoke-PVECall {
 
 function Get-PVEManagedVMs {
     [CmdletBinding()]
-    param($ProxmoxConfiguration, $Pool)
+    param($ProxmoxConfiguration)
 
-    $ManagedVMs = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "pools/$Pool" | Select-Object -ExpandProperty members
+    $ManagedVMs = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "pools/$($ProxmoxConfiguration.Pool)" | Select-Object -ExpandProperty members
 
     $return = $ManagedVMs | ForEach-Object {
         $node = $_.node
@@ -139,9 +142,9 @@ function Get-PVEServiceData {
 
 function Get-PVENodeData {
     [CmdletBinding()]
-    param ($ProxmoxConfiguration,$Group)
+    param ($ProxmoxConfiguration)
     $data = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes" 
-    $ManagedNodes = (Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "cluster/ha/groups/$Group").nodes -split ","
+    $ManagedNodes = (Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "cluster/ha/groups/$($ProxmoxConfiguration.Group)").nodes -split ","
 
     $nodes = $data | Where-Object { $_.node -in $ManagedNodes } | ForEach-Object {
         New-Object -TypeName psobject -Property @{
@@ -171,11 +174,11 @@ function New-PVEHARemediation {
 
 function Update-PVEHAConfig {
     [CmdletBinding()]
-    param($Group, $Pool, $ProxmoxConfiguration)
+    param($ProxmoxConfiguration)
 
-    $NodeData = Get-PVENodeData -ProxmoxConfiguration $ProxmoxConfiguration -Group $Group
+    $NodeData = Get-PVENodeData -ProxmoxConfiguration $ProxmoxConfiguration
     Write-Verbose ("Found: " + @($NodeData.nodes).Count + " nodes")
-    $VMData = Get-PVEManagedVMs -ProxmoxConfiguration $ProxmoxConfiguration -Pool $Pool
+    $VMData = Get-PVEManagedVMs -ProxmoxConfiguration $ProxmoxConfiguration
     Write-Verbose ("Found: " + @($VMData).Count + " VMs")
     $ServiceData = Get-PVEServiceData -ManagedVMs $VMData
     Write-Verbose ("Found: " + @($ServiceData).Count + " services") 
@@ -270,7 +273,15 @@ function Move-PVEVM {
 
 function Convertto-PVEBindZone {
     [CmdletBinding()]
-    param($Domain, $PrimaryDNS, $AdminEmail, $TTL = 600, $ServiceData, $VMData, $NSRecord)
+    param($Domain, $PrimaryDNS, $AdminEmail, $TTL = 600, $ProxmoxConfiguration, $NSRecord)
+    
+    $NodeData = Get-PVENodeData -ProxmoxConfiguration $ProxmoxConfiguration
+    Write-Verbose ("Found: " + @($NodeData.nodes).Count + " nodes")
+    $VMData = Get-PVEManagedVMs -ProxmoxConfiguration $ProxmoxConfiguration
+    Write-Verbose ("Found: " + @($VMData).Count + " VMs")
+    $ServiceData = Get-PVEServiceData -ManagedVMs $VMData
+    Write-Verbose ("Found: " + @($ServiceData).Count + " services") 
+
     $file = '$TTL 86400' + [System.Environment]::NewLine
     $file += "@`tIN`tSOA`t$PrimaryDNS`.`t$AdminEmail`. (" + [System.Environment]::NewLine
     $file += "`t`t`t`t`t`t" + (Get-Date -Format yyyyMMdd) + "01" + [System.Environment]::NewLine
@@ -291,6 +302,11 @@ function Convertto-PVEBindZone {
             $PrimaryIP = (Get-NetIPAddress -ifIndex $PrimaryInterface | Where-Object { $_.AddressFamily -eq "IPv4" }).ipaddress
             $file += ("ns`tIN`tA`t" + $PrimaryIP + [System.Environment]::NewLine)
         }
+    }
+    $NodeData.nodes | ForEach-Object {
+        $node = $_.name
+        $nodeip = (Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$node/network/vmbr0").address
+        $file += $_.name + "`tIN`tA`t" + $nodeip + [System.Environment]::NewLine
     }
     $VMData | ForEach-Object { $file += ($_.name + "`tIN`tA`t" + $_.ip_addresses + [System.Environment]::NewLine) }
     $ServiceData | ForEach-Object {

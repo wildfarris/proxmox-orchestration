@@ -1,45 +1,18 @@
-param($Target, $Auth, $Domain, $Pool, [switch]$GenerateBind, $File, $Iterations, $Group)
-
 $File = "config.json"
 
-if ($File) {
-    if (Test-Path -Path $File) {
-        $Config = Get-Content $File | Out-String | ConvertFrom-Json
-        $Target = $Config.Target      
-        $Auth = $Config.Auth        
-        $Domain = $Config.Domain      
-        $Pool = $Config.Pool        
-        $Group = $Config.Group       
-        $GenerateBind = $Config.CreateBind
-        $Loops = $Config.Iterations     
-        $ZoneFile = $Config.ZoneFile       
-        $NSRecord = $Config.NSRecord
-    }
-    else {
-        Write-Error "$File does not exist"
-    }
-}
+$Config = Get-Content $File | Out-String | ConvertFrom-Json
+$Domain = $Config.Domain
+$GenerateBind = $Config.CreateBind
+$Loops = $Config.Iterations
+$ZoneFile = $Config.ZoneFile
+$NSRecord = $Config.NSRecord
 
 Import-Module $PSScriptRoot\proxmox.psm1 -force
 
-$ProxmoxConfiguration = Get-PVEConnectionConfig -Target $Target -Authorization $Auth -Group $Group -Pool $Pool
+$ProxmoxConfiguration = Get-PVEConfiguration -File $File
 
-for ($x = 0; $x -lt $Loops; $x++) {
-    Write-Verbose ("Starting loop " + $x)
-
-    $Remediations = Update-PVEHAConfig -ProxmoxConfiguration $ProxmoxConfiguration
-
-    if ($Remediations) {
-        $Remediations | ForEach-Object { 
-            Write-Debug ("Running " + ($_.Remediation | ConvertTo-Json -Compress) + " to correct " + $_.Rule)
-            Move-PVEVM -ProxmoxConfiguration $ProxmoxConfiguration -MoveData $_.Remediation
-        }
-        Start-Sleep -Seconds 30
-    }
-    else {
-        Write-Verbose "No remediations found"
-        $x = $Loops
-    }
-}
+Optimize-PVEResourceBalance -ProxmoxConfiguration $ProxmoxConfiguration -Loops $Loops
 
 if ($GenerateBind) { Convertto-PVEBindZone -Domain $Domain -PrimaryDNS ("ns." + $Domain) -AdminEmail ("webmaster@" + $Domain)  -ProxmoxConfiguration $ProxmoxConfiguration -NSRecord $NSRecord | Out-File $ZoneFile }
+
+#Convertto-PVEBindZone @($Config | select domain,NSRecord) -PrimaryDNS ("ns." + $Domain) -AdminEmail ("webmaster@" + $Domain) -ProxmoxConfiguration $ProxmoxConfiguration 

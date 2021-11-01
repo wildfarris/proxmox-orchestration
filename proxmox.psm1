@@ -1,5 +1,4 @@
 function New-PVEConfiguration {
-    [CmdletBinding()]
     $Target = Read-Host -Prompt "Proxmox Server? "
     if (!$Target) { Write-Error "Must provide a value" -ErrorAction Stop }
     $ProxmoxToken = Read-Host -Prompt "Proxmox API Token (Format: PVEAPIToken=<USERNAME>@<REALM>!<API-TOKEN-NAME>=<SECRET>)? "
@@ -41,40 +40,31 @@ function New-PVEConfiguration {
     ConvertTo-Json $ProxmoxConfiguration
 }
 
-function Get-PVEConnectionConfig {
-    [CmdletBinding()]
-    param($File, $Target, $Authorization, $Format = "json", $Group, $Pool)
-    if ($File) {
-        if (Test-Path -Path $File) {
-            $Config = Get-Content $File | Out-String | ConvertFrom-Json
-            $Target = $Config.Target
-            $Authorization = $Config.Auth
-            $Group = $Config.Group
-            $Pool = $Config.Pool
-        }
-        else {
-            Write-Error "$File does not exist"
-        }
+function Get-PVEConfiguration {
+    param($File, $Target, $Auth, $Pool, $Group, $CreateBind, $Domain, $ZoneFile, $NSRecord, $Format)
+
+    if($File){
+        if(Test-Path $File){ $FileConfig = Get-Content $File | Out-String | ConvertFrom-Json }
     }
-    if ($Target -and $Authorization) {
-        $Config = New-Object -TypeName psobject -Property @{
-            Auth   = $Authorization
-            Target = $Target
-            Format = $Format
-            Group  = $Group
-            Pool   = $Pool
-        }
+
+    $Config = New-Object -TypeName psobject -Property @{
+        Target     = ($Target, $FileConfig.Target, "localhost" -ne $null)[0]
+        Auth       = ($Auth, $FileConfig.Auth, "" -ne $null)[0]
+        Pool       = ($Pool, $FileConfig.Pool, "managed" -ne $null)[0]
+        Group      = ($Group, $FileConfig.Group, "default" -ne $null)[0]
+        CreateBind = ($CreateBind, $FileConfig.CreateBind, $false -ne $null)[0]
+        Domain     = ($Domain, $FileConfig.Domain, "local" -ne $null)[0]
+        ZoneFile   = ($ZoneFile, $FileConfig.ZoneFile, "local.zone" -ne $null)[0]
+        NSRecord   = ($NSRecord, $FileConfig.NSRecord, "ns" -ne $null)[0]
+        Format     = ($Format, $FileConfig.Format, "json" -ne $null)[0]
     }
-    else {
-        Write-Error "Missing required parameters. Must have -File or both -Target and -Authorization"
-    }
-    
+
     Write-Verbose ("Configuration read: " + ($Config | ConvertTo-Json -Compress))
     $Config
 }
 
+
 function Invoke-PVECall {
-    [CmdletBinding()]
     param($ProxmoxConfiguration, $Endpoint, $Method = "GET", $Body)
 
     $Uri = $ProxmoxConfiguration.Target + "/api2/" + $ProxmoxConfiguration.Format + "/" + $Endpoint
@@ -99,7 +89,6 @@ function Invoke-PVECall {
 }
 
 function Get-PVEManagedVMs {
-    [CmdletBinding()]
     param($ProxmoxConfiguration)
 
     $ManagedVMs = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "pools/$($ProxmoxConfiguration.Pool)" | Select-Object -ExpandProperty members
@@ -119,7 +108,6 @@ function Get-PVEManagedVMs {
 }
 
 function Get-PVEServiceData {
-    [CmdletBinding()]
     param($ManagedVMs)
 
     $Services = $ManagedVMs | Where-Object { $_.name -like "*-*" } | Select-Object -ExpandProperty name | ForEach-Object { $_ -split "-" | Select-Object -First 1 } | Sort-Object -Unique
@@ -139,7 +127,6 @@ function Get-PVEServiceData {
 }
 
 function Get-PVENodeData {
-    [CmdletBinding()]
     param ($ProxmoxConfiguration)
     $data = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes" 
     $ManagedNodes = (Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "cluster/ha/groups/$($ProxmoxConfiguration.Group)").nodes -split ","
@@ -165,13 +152,11 @@ function Get-PVENodeData {
 }
 
 function New-PVEHARemediation {
-    [CmdletBinding()]
     param($Remediation)
     New-Object -TypeName psobject -Property $Remediation | Select-Object FromNode, ToNode, VM
 }
 
 function Update-PVEHAConfig {
-    [CmdletBinding()]
     param($ProxmoxConfiguration)
 
     $NodeData = Get-PVENodeData -ProxmoxConfiguration $ProxmoxConfiguration
@@ -264,13 +249,34 @@ function Update-PVEHAConfig {
 }
 
 function Move-PVEVM {
-    [CmdletBinding()]
     param($ProxmoxConfiguration, $MoveData)
     Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$($MoveData.FromNode)/qemu/$($MoveData.VM)/migrate" -Body ('target=' + $MoveData.ToNode + ';online=1') -Method "POST" | Out-Null
 }
 
+function Optimize-PVEResourceBalance{
+    param($ProxmoxConfiguration, $Loops, $Pause = 30)
+    
+    for ($x = 0; $x -lt $Loops; $x++) {
+        Write-Verbose ("Starting loop " + $x)
+    
+        $Remediations = Update-PVEHAConfig -ProxmoxConfiguration $ProxmoxConfiguration
+    
+        if ($Remediations) {
+            $Remediations | ForEach-Object { 
+                Write-Verbose ("Running " + ($_.Remediation | ConvertTo-Json -Compress) + " to correct " + $_.Rule)
+                Move-PVEVM -ProxmoxConfiguration $ProxmoxConfiguration -MoveData $_.Remediation
+            }
+            Start-Sleep -Seconds $Pause
+        }
+        else {
+            Write-Verbose "No remediations found"
+            $x = $Loops
+        }
+    }
+}
+
+
 function Convertto-PVEBindZone {
-    [CmdletBinding()]
     param($Domain, $PrimaryDNS, $AdminEmail, $TTL = 600, $ProxmoxConfiguration, $NSRecord)
     
     $NodeData = Get-PVENodeData -ProxmoxConfiguration $ProxmoxConfiguration
@@ -315,7 +321,7 @@ function Convertto-PVEBindZone {
 }
 
 Export-ModuleMember -Function New-PVEConfiguration
-Export-ModuleMember -Function Get-PVEConnectionConfig
+Export-ModuleMember -Function Get-PVEConfiguration
 Export-ModuleMember -Function Invoke-PVECall
 Export-ModuleMember -Function Get-PVEManagedVMs
 Export-ModuleMember -Function Get-PVEServiceData
@@ -323,3 +329,4 @@ Export-ModuleMember -Function Get-PVENodeData
 Export-ModuleMember -Function Update-PVEHAConfig
 Export-ModuleMember -Function Move-PVEVM
 Export-ModuleMember -Function Convertto-PVEBindZone
+Export-ModuleMember -Function Optimize-PVEResourceBalance

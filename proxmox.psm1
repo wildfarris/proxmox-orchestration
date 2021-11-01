@@ -61,8 +61,8 @@ function Get-PVEConnectionConfig {
             Auth   = $Authorization
             Target = $Target
             Format = $Format
-            Group = $Group
-            Pool = $Pool
+            Group  = $Group
+            Pool   = $Pool
         }
     }
     else {
@@ -108,12 +108,10 @@ function Get-PVEManagedVMs {
         $node = $_.node
         $id = $_.id
 
-        $Ignored_IPs = @("127.0.0.1", "172.17.0.1")
         $results = Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$node/$id/agent/network-get-interfaces"
-        $ipaddresses = $results.result."ip-addresses" | Where-Object { $_."ip-address-type" -eq "ipv4" -and $_."ip-address" -notin $Ignored_IPs } | Select-Object -ExpandProperty ip-address
-        if (!$ipaddresses) { $ipaddresses = "0.0.0.0" }
-
-        Add-Member -InputObject $_ -Name "ip_addresses" -Value $ipaddresses -MemberType NoteProperty -PassThru -Force
+        $eth0 = $results.result | Where-Object { $_."name" -eq "eth0" } 
+        $ipaddress = $eth0."ip-addresses" | Where-Object { $_."ip-address-type" -eq "ipv4" } | Select-Object -ExpandProperty ip-address
+        if ($ipaddress) { Add-Member -InputObject $_ -Name "ipaddress" -Value $ipaddress -MemberType NoteProperty -PassThru -Force }
     } 
 
     Write-Verbose ("Managed VM data: " + ($return | ConvertTo-Json -Compress))
@@ -132,7 +130,7 @@ function Get-PVEServiceData {
         
         New-Object -TypeName psobject -Property @{
             Service    = $ServiceName
-            Components = $Components | Select-Object vmid, node, name, ip_addresses, mem, cpu
+            Components = $Components | Select-Object vmid, node, name, ipaddress, mem, cpu
         }
     }
 
@@ -308,10 +306,10 @@ function Convertto-PVEBindZone {
         $nodeip = (Invoke-PVECall -ProxmoxConfiguration $ProxmoxConfiguration -Endpoint "nodes/$node/network/vmbr0").address
         $file += $_.name + "`tIN`tA`t" + $nodeip + [System.Environment]::NewLine
     }
-    $VMData | ForEach-Object { $file += ($_.name + "`tIN`tA`t" + $_.ip_addresses + [System.Environment]::NewLine) }
+    $VMData | ForEach-Object { $file += ($_.name + "`tIN`tA`t" + $_.ipaddress + [System.Environment]::NewLine) }
     $ServiceData | ForEach-Object {
         $ServiceName = $_.Service
-        $_.Components | ForEach-Object { $file += ($ServiceName + "`tIN`tA`t" + $_.ip_addresses + [System.Environment]::NewLine) }
+        $_.Components | ForEach-Object { $file += ($ServiceName + "`tIN`tA`t" + $_.ipaddress + [System.Environment]::NewLine) }
     }
     $file
 }
